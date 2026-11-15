@@ -239,3 +239,12 @@ p.hist{font-size:13px;margin:0 0 8px;border-bottom:1px solid var(--hair);padding
 .epage input[type=search]{flex:1;min-width:240px;height:44px;padding:0 16px;border:1px solid var(--hair);border-radius:999px;font:inherit;background:var(--tile);color:var(--ink)}
 .epage td,.epage th{padding:10px 14px}
 tr.row{cursor:pointer}
+
+/* ---------- admin review queue ---------- */
+.erow.sug{background:var(--band);border:1px solid var(--hair);border-radius:var(--r-s);padding:14px 16px;margin:10px 0}
+.sugh{margin:8px 0 4px;font-weight:600}
+.sugl{margin:0;padding:0;list-style:none}.sugl li{margin:6px 0}.sugl li.note{color:var(--ink2)}
+.sugt{border-collapse:collapse;margin-top:4px;font-size:13px}.sugt td{padding:2px 14px 2px 0;vertical-align:top}.sugt td:first-child{color:var(--ink2);text-transform:capitalize}.sugt s{color:var(--ink2)}
+.erow.sug details{margin-top:8px;font-size:13px}.erow.sug summary,details.closed summary{cursor:pointer;color:var(--ink2)}
+.erow.sug .eact{display:flex;flex-direction:column;gap:6px;align-items:stretch}.erow.sug .eact .mini{margin-left:0;justify-content:center}
+details.closed{margin:14px 0 28px;font-size:14px}
