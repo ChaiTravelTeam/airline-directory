@@ -138,23 +138,71 @@ async function reportProblem(a) {
   await run(sb.from('reports').insert({ airline_id: a.id, reported_by: session.user.id, message: v.message }), 'Thanks — sent to the admins.');
 }
 
+/* ---------- review queue: suggested changes ---------- */
+const SUG = { contacts: ['kind', 'label', 'name', 'phone', 'phone_mobile', 'email', 'queue', 'hours', 'notes'], contracts: ['title', 'tour_code', 'valid_from', 'valid_to', 'status', 'summary'], links: ['label', 'url', 'is_pdf'], airline_sections: ['heading', 'body'] };
+const SUG_NOUN = { contacts: 'contact', contracts: 'contract', links: 'link', airline_sections: 'section' };
+const sugChanges = r => (r.suggestion?.changes || []).filter(c => c && c.op);
+const sugDoable = r => sugChanges(r).filter(c => c.op !== 'note' && SUG[c.table]);
+const sv = v => v === null || v === undefined || v === '' ? '<span class="muted">blank</span>' : esc(String(v).slice(0, 140));
+function sugHtml(c) {
+  const what = `<b>${esc(c.label || SUG_NOUN[c.table] || '')}</b>`;
+  if (c.op === 'note') return `<li class="note">${esc(c.text || '')}</li>`;
+  if (!SUG[c.table]) return '';
+  const set = strip(c.set || {}, SUG[c.table]);
+  if (c.op === 'delete') return `<li>Remove ${SUG_NOUN[c.table]} ${what}</li>`;
+  if (c.op === 'insert') return `<li>Add ${SUG_NOUN[c.table]} ${what}: ${Object.entries(set).filter(([k, v]) => v !== null && v !== '' && k !== 'label' && k !== 'kind').map(([k, v]) => `${esc(k)} ${sv(v)}`).join(' · ')}</li>`;
+  return `<li>${what}<table class="sugt">${Object.keys(set).map(k => `<tr><td>${esc(k.replace('_', ' '))}</td><td><s>${sv((c.was || {})[k])}</s></td><td>→ ${sv(set[k])}</td></tr>`).join('')}</table></li>`;
+}
+async function applySuggestion(r) {
+  const same = (a, b) => (a ?? null) === (b ?? null) || String(a ?? '') === String(b ?? '');
+  for (const c of sugDoable(r)) {
+    const set = strip(c.set || {}, SUG[c.table]), name = c.label || SUG_NOUN[c.table];
+    if (c.op === 'insert') {
+      if (!r.airline_id) { toast('This suggestion isn’t tied to a carrier — add it from the carrier page.', true); return false; }
+      const { count } = await sb.from(c.table).select('id', { count: 'exact', head: true }).eq('airline_id', r.airline_id);
+      const { error } = await sb.from(c.table).insert({ ...set, airline_id: r.airline_id, position: count || 0 });
+      if (error) { toast(`${name}: ${error.message}`, true); return false; }
+      continue;
+    }
+    const { data: cur } = await sb.from(c.table).select('*').eq('id', c.id).maybeSingle();
+    if (!cur) { toast(`“${name}” no longer exists — use Edit carrier instead.`, true); return false; }
+    if (c.op === 'delete') { const { error } = await sb.from(c.table).delete().eq('id', c.id); if (error) { toast(`${name}: ${error.message}`, true); return false; } continue; }
+    const moved = Object.keys(c.was || {}).filter(k => k in set && !same(cur[k], c.was[k]) && !same(cur[k], set[k]));
+    if (moved.length && !(await confirmBox(`“${name}” was edited after this suggestion was made (${moved.join(', ')}). Overwrite with the suggested values?`))) return false;
+    const { error } = await sb.from(c.table).update(set).eq('id', c.id);
+    if (error) { toast(`${name}: ${error.message}`, true); return false; }
+  }
+  AIRLINES = null; return true;
+}
+const closeReport = id => sb.from('reports').update({ resolved_at: new Date().toISOString(), resolved_by: session.user.id }).eq('id', id);
+
 /* ---------- admin page ---------- */
 let adminQ = '';
 async function renderAdmin() {
   if (!profile || profile.role !== 'admin') { app.innerHTML = '<p class="empty">Admins only.</p>'; return; }
   const air = await loadAirlines();
-  const [{ data: list }, { data: profs }, { data: reports }] = await Promise.all([
+  const REP = 'id,message,suggestion,created_at,resolved_at,airline_id,reported_by,airlines(code,name),profiles!reports_reported_by_fkey(full_name,email)';
+  const [{ data: list }, { data: profs }, { data: reports }, { data: closed }] = await Promise.all([
     sb.from('allowlist').select('*').order('email'),
     sb.from('profiles').select('id,email,full_name,is_active,role,last_seen_at,created_at').order('created_at', { ascending: false }),
-    sb.from('reports').select('id,message,created_at,resolved_at,airline_id,reported_by,airlines(code,name),profiles!reports_reported_by_fkey(full_name,email)').is('resolved_at', null).order('created_at', { ascending: false })
+    sb.from('reports').select(REP).is('resolved_at', null).order('created_at', { ascending: false }),
+    sb.from('reports').select(REP).not('resolved_at', 'is', null).order('resolved_at', { ascending: false }).limit(8)
   ]);
+  const slugOf = r => air.find(x => x.id === r.airline_id)?.slug || '';
+  const repHead = r => `<b>${r.airline_id ? `<a href="#/airline/${esc(slugOf(r))}">${esc(r.airlines?.code || '')} ${esc(r.airlines?.name || '')}</a>` : 'General'}</b> · <span class="muted">${esc(r.profiles?.full_name || r.profiles?.email || 'Weekly source check')} · ${new Date(r.created_at).toLocaleString()}</span>`;
+  const repCard = r => {
+    const ch = sugChanges(r), can = sugDoable(r).length > 0, edit = r.airline_id ? `<a class="mini" href="#/airline/${esc(slugOf(r))}/edit">Edit carrier</a>` : '';
+    if (!ch.length) return `<div class="erow"><div class="etext">${repHead(r)}<br>${esc(r.message)}</div><div class="eact">${edit}<button class="mini" data-close="${r.id}">Mark done</button></div></div>`;
+    return `<div class="erow sug"><div class="etext">${repHead(r)}<p class="sugh">${esc(r.suggestion.summary || 'Suggested change')}</p><ul class="sugl">${ch.map(sugHtml).join('')}</ul><details><summary>Details</summary><p class="muted">${esc(r.message)}</p></details></div><div class="eact">${can ? `<button class="mini dark" data-apply="${r.id}">Apply change</button>` : ''}${edit}<button class="mini" data-close="${r.id}" data-dismiss="1">Dismiss</button></div></div>`;
+  };
   const unmatched = (profs || []).filter(p => !p.is_active && !(list || []).some(l => l.email === p.email));
   const rows = (list || []).filter(u => !adminQ || (u.email + ' ' + (u.full_name || '')).toLowerCase().includes(adminQ.toLowerCase()));
   const seen = e => { const p = (profs || []).find(x => x.email === e); return p?.last_seen_at ? new Date(p.last_seen_at).toLocaleDateString() : '<span class="empty">never</span>'; };
   app.innerHTML = `<a class="back" href="#/">← All airlines</a>
   <div class="ahead"><h2>Admin</h2><span class="src">${(list || []).length} on the access list · ${(list || []).filter(u => u.role === 'admin').length} admins</span></div>
-  ${reports?.length ? `<section class="s"><h3>Open problem reports (${reports.length})</h3>${reports.map(r => `<div class="erow"><div class="etext"><b><a href="#/airline/${esc(air.find(x => x.id === r.airline_id)?.slug || '')}">${esc(r.airlines?.code || '')} ${esc(r.airlines?.name || '')}</a></b> · <span class="muted">${esc(r.profiles?.full_name || r.profiles?.email || '')} · ${new Date(r.created_at).toLocaleString()}</span><br>${esc(r.message)}</div><div class="eact"><button class="mini" data-resolve="${r.id}">Resolve</button></div></div>`).join('')}</section>` : ''}
+  ${reports?.length ? `<section class="s"><h3>Needs review (${reports.length})</h3><p class="muted">Apply change updates the carrier page and closes the item. Dismiss and Mark done only close the item — they change nothing on the carrier page.</p>${reports.map(repCard).join('')}</section>` : ''}
   ${unmatched.length ? `<section class="s"><h3>Signed in but not on the list (${unmatched.length})</h3><p class="muted">These people authenticated with Google/Microsoft but their address isn’t on the access list. Approve to add them as users.</p>${unmatched.map(p => `<div class="erow"><div class="etext">${esc(p.full_name || '')} <span class="muted">${esc(p.email)} · ${new Date(p.created_at).toLocaleString()}</span></div><div class="eact"><button class="mini" data-approve="${esc(p.email)}" data-name="${esc(p.full_name || '')}">Approve</button></div></div>`).join('')}</section>` : ''}
+  ${closed?.length ? `<details class="closed"><summary>Recently closed (${closed.length})</summary>${closed.map(r => `<div class="erow"><div class="etext">${repHead(r)} · <span class="muted">closed ${new Date(r.resolved_at).toLocaleDateString()}</span><br>${esc(r.suggestion?.summary || r.message.slice(0, 220))}</div><div class="eact"><button class="mini" data-reopen="${r.id}">Reopen</button></div></div>`).join('')}</details>` : ''}
   <section class="s"><h3>Access list <button class="mini" data-add-user>+ Add person</button> <button class="mini" data-import>Import CSV</button></h3>
   <div class="tools"><input type="search" id="aq" placeholder="Search name or email" value="${esc(adminQ)}"></div>
   <div class="wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Type</th><th>Active</th><th>Last sign-in</th><th></th></tr></thead><tbody>
@@ -174,5 +222,8 @@ async function renderAdmin() {
   app.querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => { const u = byEmail(b.dataset.toggle); if (u.email === profile.email) return toast('You can’t deactivate yourself.', true); await run(sb.from('allowlist').update({ is_active: !u.is_active }).eq('email', u.email), u.is_active ? 'Deactivated' : 'Activated') && renderAdmin(); });
   app.querySelectorAll('[data-remove]').forEach(b => b.onclick = async () => { const e = b.dataset.remove; if (e === profile.email) return toast('You can’t remove yourself.', true); if (await confirmBox(`Remove ${e} from the access list?`)) await run(sb.from('allowlist').delete().eq('email', e), 'Removed') && renderAdmin(); });
   app.querySelectorAll('[data-approve]').forEach(b => b.onclick = async () => { await run(sb.from('allowlist').insert({ email: b.dataset.approve, full_name: b.dataset.name || null, role: 'user', advisor_type: 'ic', added_by: profile.email }), 'Approved') && renderAdmin(); });
-  app.querySelectorAll('[data-resolve]').forEach(b => b.onclick = async () => { await run(sb.from('reports').update({ resolved_at: new Date().toISOString(), resolved_by: session.user.id }).eq('id', b.dataset.resolve), 'Resolved') && renderAdmin(); });
+  const rep = id => (reports || []).find(r => r.id === id);
+  app.querySelectorAll('[data-apply]').forEach(b => b.onclick = async () => { b.disabled = true; const r = rep(b.dataset.apply); if (await applySuggestion(r)) { await run(closeReport(r.id), 'Applied to the carrier page'); } renderAdmin(); });
+  app.querySelectorAll('[data-close]').forEach(b => b.onclick = async () => { if (b.dataset.dismiss && !(await confirmBox('Dismiss without changing the carrier page?'))) return; await run(closeReport(b.dataset.close), 'Closed') && renderAdmin(); });
+  app.querySelectorAll('[data-reopen]').forEach(b => b.onclick = async () => { await run(sb.from('reports').update({ resolved_at: null, resolved_by: null }).eq('id', b.dataset.reopen), 'Reopened') && renderAdmin(); });
 }
