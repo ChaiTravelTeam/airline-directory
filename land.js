@@ -13,13 +13,32 @@ const LAND_CATS = [
   { key: 'service', name: 'Services & Miscellaneous', one: 'service' },
   { key: 'private_jet', name: 'Private Jet', one: 'operator' }
 ];
+const U = id => `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=1400&q=70`;
+const LAND_PHOTOS = {
+  hotel: ['1683290844875-0eee4089069a', '1678913308053-316cee77afe9'],
+  cruise: ['1554254648-2d58a1bc3fd5', '1511316695145-4992006ffddb'],
+  tour_operator: ['1539635278303-d4002c07eae3', '1507237615867-0d4d2ad6b2d1'],
+  dmc: ['1524661135-423995f22d0b', '1516546453174-5e1098a4b4af'],
+  villa: ['1613977257365-aaae5a9817ff', '1543489822-c49534f3271f'],
+  ground: ['1533630217389-3a5e4dff5683', '1473655587843-eda8944061e8'],
+  insurance: ['1519692933481-e162a57d6721', '1523772721666-22ad3c3b6f90'],
+  rep_company: ['1686771416282-3888ddaf249b', '1759310610325-2c7cb621e5e3'],
+  service: ['1571648393415-d5dfa1785d87', '1571648393926-b03261908235'],
+  private_jet: []
+};
+const landBg = k => ['linear-gradient(180deg,rgba(20,24,32,.05) 30%,rgba(20,24,32,.78) 100%)', ...(LAND_PHOTOS[k] || []).map(id => `url('${U(id)}')`)].join(',');
+const landInitials = n => String(n || '?').replace(/[^A-Za-z0-9 &]/g, '').trim().split(/\s+/).filter(w => !/^(the|and|&|of|by)$/i.test(w)).map(w => w[0]).slice(0, 2).join('').toUpperCase() || '?';
+function landLogo(p, cls = '') {
+  const src = p.logo_url || (p.website_domain ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(p.website_domain)}&sz=128` : '');
+  return `<span class="llogo ${cls} ${src ? '' : 'nologo'}">${src ? `<img src="${esc(src)}" alt="" loading="lazy" onerror="this.parentNode.classList.add('nologo');this.remove()">` : ''}<span class="fb">${esc(landInitials(p.name))}</span></span>`;
+}
 const landCat = k => LAND_CATS.find(c => c.key === k);
 let LISTINGS = null, landQ = '', landSub = '';
 
 async function loadListings() {
   if (LISTINGS) return LISTINGS;
   const { data, error } = await sb.from('partner_listings')
-    .select('category,subcategory,display_name,position,partners(id,slug,name,category,commission,is_preferred,needs_review,is_archived)')
+    .select('category,subcategory,display_name,position,partners(id,slug,name,category,commission,is_preferred,needs_review,is_archived,website_domain,logo_url)')
     .order('position').range(0, 4999);
   if (error) throw error;
   LISTINGS = (data || []).filter(l => l.partners);
@@ -72,7 +91,7 @@ async function renderPartnersHome(alive = () => true) {
   const seen = new Set(), found = [];
   for (const l of hits) { if (seen.has(l.partners.id)) continue; seen.add(l.partners.id); found.push(l); }
   app.innerHTML = `
-  <section class="hero"><div class="wrap-in">
+  <section class="hero lhero"><div class="wrap-in">
     <p class="kicker">Admin preview · ${total} partners</p>
     <h1>Find a partner.</h1>
     <p class="sub">Contacts, commission and booking details for hotels, cruise lines, tour operators and more.</p>
@@ -80,8 +99,8 @@ async function renderPartnersHome(alive = () => true) {
   </div></section>
   <div class="wrap-in index-body">
     ${hay.length ? `<div class="grp"><h3>Results<small>${found.length}</small></h3></div>${found.length ? `<div class="grid">${found.slice(0, 60).map(landTile).join('')}</div>` : '<p class="nores">No partners match.</p>'}` : `
-    <div class="grp"><h3>Categories</h3></div>
-    <div class="grid">${LAND_CATS.filter(c => uniq(c.key)).map(c => `<a class="tile lcat" href="#/partners/${c.key}"><span class="txt"><span class="nm">${esc(c.name)}</span><span class="lsub">${uniq(c.key)} ${uniq(c.key) === 1 ? esc(c.one) : esc(c.one) + 's'}</span></span></a>`).join('')}</div>`}
+    <div class="grp"><h3>Browse by category</h3></div>
+    <div class="lmosaic">${LAND_CATS.filter(c => uniq(c.key)).map((c, i) => `<a class="lphoto${i === 0 ? ' big' : ''}" href="#/partners/${c.key}" style="background-image:${landBg(c.key)}"><span class="lp-txt"><span class="lp-n">${uniq(c.key)} ${uniq(c.key) === 1 ? esc(c.one) : esc(c.one) + 's'}</span><span class="lp-nm">${esc(c.name)}</span></span><span class="lp-go" aria-hidden="true">→</span></a>`).join('')}</div>`}
   </div>`;
   const qi = document.getElementById('lq');
   qi.oninput = e => { landQ = e.target.value; const pos = qi.selectionStart; renderPartnersHome().then(() => { const n = document.getElementById('lq'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }); };
@@ -91,7 +110,7 @@ function landTile(l) {
   const p = l.partners, alias = l.display_name && l.display_name.toLowerCase() !== p.name.toLowerCase();
   const comm = (p.commission || '').split('\n')[0].replace(/\*/g, '').slice(0, 28);
   return `<a class="tile ltile" href="#/partner/${esc(p.slug)}" title="${esc(p.name)}">
-    <span class="top"><span class="lchips">${p.is_preferred ? '<span class="chip vf">Preferred</span>' : ''}${p.needs_review && isAdmin() ? '<span class="chip warn">Review</span>' : ''}</span></span>
+    <span class="top">${landLogo(p)}<span class="lchips">${p.is_preferred ? '<span class="chip vf">Preferred</span>' : ''}${p.needs_review && isAdmin() ? '<span class="chip warn">Review</span>' : ''}</span></span>
     <span class="txt"><span class="nm">${esc(l.display_name || p.name)}</span><span class="lsub">${alias ? esc(p.name) : (comm ? 'Commission ' + esc(comm) : '&nbsp;')}</span></span></a>`;
 }
 
@@ -122,7 +141,7 @@ async function renderPartnerCategory(key, alive = () => true) {
     }).join('');
   }
   app.innerHTML = `
-  <section class="hero"><div class="wrap-in">
+  <section class="hero lband" style="background-image:linear-gradient(90deg,rgba(20,24,32,.82),rgba(20,24,32,.45)),${(LAND_PHOTOS[key] || []).map(id => `url('${U(id)}')`).join(',') || 'none'}"><div class="wrap-in">
     <p class="kicker"><a href="#/partners">Partners</a> · ${new Set(all.map(l => l.partners.id)).size} on file</p>
     <h1>${esc(cat.name)}</h1>
     <div class="tools"><label class="search">${ICON_SEARCH}<input type="search" id="lq" placeholder="Search ${esc(cat.name.toLowerCase())}…" value="${esc(landQ)}" autocomplete="off"></label></div>
@@ -171,7 +190,7 @@ async function renderPartner(slug, alive = () => true) {
   app.innerHTML = `
   <div class="ahead-wrap"><div class="wrap-in">
     <p class="crumb"><a href="#/partners">Partners</a><span>›</span><a href="#/partners/${esc(cat.key)}">${esc(cat.name)}</a><span>›</span><b>${esc(p.name)}</b></p>
-    <div class="ahead"><div class="ttl"><div class="row1"><h2>${esc(p.name)}</h2>${p.is_preferred ? '<span class="chip vf">Preferred</span>' : ''}${p.is_archived ? '<span class="chip no">Archived</span>' : ''}</div>
+    <div class="ahead">${landLogo(p, 'xl')}<div class="ttl"><div class="row1"><h2>${esc(p.name)}</h2>${p.is_preferred ? '<span class="chip vf">Preferred</span>' : ''}${p.is_archived ? '<span class="chip no">Archived</span>' : ''}</div>
       <p class="meta">${esc(cat.name)}${p.commission ? ` · Commission ${esc(p.commission.split('\n')[0].replace(/\*/g, ''))}` : ''}</p></div></div>
   </div></div>
   <div class="body"><div class="wrap-in"><div class="mainc">${main.join('')}</div></div></div>`;
