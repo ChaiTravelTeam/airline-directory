@@ -38,7 +38,7 @@ let LISTINGS = null, landQ = '', landSub = '';
 async function loadListings() {
   if (LISTINGS) return LISTINGS;
   const { data, error } = await sb.from('partner_listings')
-    .select('category,subcategory,display_name,position,partners(id,slug,name,category,commission,is_preferred,needs_review,is_archived,website_domain,logo_url)')
+    .select('category,subcategory,display_name,position,website_domain,logo_url,partners(id,slug,name,category,commission,is_preferred,needs_review,is_archived,website_domain,logo_url)')
     .order('position').range(0, 4999);
   if (error) throw error;
   LISTINGS = (data || []).filter(l => l.partners);
@@ -110,7 +110,7 @@ function landTile(l) {
   const p = l.partners, alias = l.display_name && l.display_name.toLowerCase() !== p.name.toLowerCase();
   const comm = (p.commission || '').split('\n')[0].replace(/\*/g, '').slice(0, 28);
   return `<a class="tile ltile" href="#/partner/${esc(p.slug)}" title="${esc(p.name)}">
-    <span class="top">${landLogo(p)}<span class="lchips">${p.is_preferred ? '<span class="chip vf">Preferred</span>' : ''}${p.needs_review && isAdmin() ? '<span class="chip warn">Review</span>' : ''}</span></span>
+    <span class="top">${landLogo({ name: l.display_name || p.name, website_domain: l.website_domain || p.website_domain, logo_url: l.logo_url || p.logo_url })}<span class="lchips">${p.is_preferred ? '<span class="chip vf">Preferred</span>' : ''}${p.needs_review && isAdmin() ? '<span class="chip warn">Review</span>' : ''}</span></span>
     <span class="txt"><span class="nm">${esc(l.display_name || p.name)}</span><span class="lsub">${alias ? esc(p.name) : (comm ? 'Commission ' + esc(comm) : '&nbsp;')}</span></span></a>`;
 }
 
