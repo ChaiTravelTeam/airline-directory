@@ -146,7 +146,8 @@ async function renderPartnerCategory(key, alive = () => true) {
     <h1>${esc(cat.name)}</h1>
     <div class="tools"><label class="search">${ICON_SEARCH}<input type="search" id="lq" placeholder="Search ${esc(cat.name.toLowerCase())}…" value="${esc(landQ)}" autocomplete="off"></label></div>
   </div></section>
-  <div class="wrap-in index-body">${body}</div>`;
+  <div class="wrap-in index-body">${isAdmin() ? '<p style="margin:20px 0 0"><button class="btn2" id="ladd">Add partner</button></p>' : ''}${body}</div>`;
+  const addB = document.getElementById('ladd'); if (addB) addB.onclick = () => landAddPartner(key);
   const qi = document.getElementById('lq');
   qi.oninput = e => { landQ = e.target.value; const pos = qi.selectionStart; renderPartnerCategory(key).then(() => { const n = document.getElementById('lq'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }); };
   const sel = document.getElementById('lsub'); if (sel) sel.onchange = () => { landSub = sel.value; renderPartnerCategory(key); };
@@ -191,7 +192,7 @@ async function renderPartner(slug, alive = () => true) {
   <div class="ahead-wrap"><div class="wrap-in">
     <p class="crumb"><a href="#/partners">Partners</a><span>›</span><a href="#/partners/${esc(cat.key)}">${esc(cat.name)}</a><span>›</span><b>${esc(p.name)}</b></p>
     <div class="ahead">${landLogo(p, 'xl')}<div class="ttl"><div class="row1"><h2>${esc(p.name)}</h2>${p.is_preferred ? '<span class="chip vf">Preferred</span>' : ''}${p.is_archived ? '<span class="chip no">Archived</span>' : ''}</div>
-      <p class="meta">${esc(cat.name)}${p.commission ? ` · Commission ${esc(p.commission.split('\n')[0].replace(/\*/g, ''))}` : ''}</p></div></div>
+      <p class="meta">${isAdmin() ? `<a class="btn2" style="display:inline-flex;align-items:center;text-decoration:none" href="#/partner/${esc(p.slug)}/edit">Edit partner</a>` : ''}${esc(cat.name)}${p.commission ? ` · Commission ${esc(p.commission.split('\n')[0].replace(/\*/g, ''))}` : ''}</p></div></div>
   </div></div>
   <div class="body"><div class="wrap-in"><div class="mainc">${main.join('')}</div></div></div>`;
 }
@@ -202,6 +203,7 @@ function landRoute(alive) {
   const h = location.hash;
   if (h !== landLast) { landQ = ''; landSub = ''; landLast = h; }
   let m;
+  if ((m = h.match(/^#\/partner\/([a-z0-9\-]+)\/edit/)) && typeof renderPartnerEdit === 'function') return renderPartnerEdit(m[1], alive);
   if ((m = h.match(/^#\/partner\/([a-z0-9\-]+)/))) return renderPartner(m[1], alive);
   if ((m = h.match(/^#\/partners\/([a-z_]+)/))) return renderPartnerCategory(m[1], alive);
   if (/^#\/partners\/?$/.test(h)) return renderPartnersHome(alive);
