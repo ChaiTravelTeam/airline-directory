@@ -92,7 +92,7 @@ async function renderPartnersHome(alive = () => true) {
   for (const l of hits) { if (seen.has(l.partners.id)) continue; seen.add(l.partners.id); found.push(l); }
   app.innerHTML = `
   <section class="hero lhero"><div class="wrap-in">
-    <p class="kicker">Admin preview · ${total} partners · <a href="#/partners-access">People &amp; access</a></p>
+    <p class="kicker">Admin preview · ${total} partners</p>
     <h1>Find a partner.</h1>
     <p class="sub">Contacts, commission and booking details for hotels, cruise lines, tour operators and more.</p>
     <div class="tools"><label class="search">${ICON_SEARCH}<input type="search" id="lq" placeholder="Partner, brand or country…" value="${esc(landQ)}" autocomplete="off"></label></div>

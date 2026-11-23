@@ -308,14 +308,15 @@ async function route() {
   if (!profile) await loadProfile();
   if (seq !== routeSeq) return;
   if (!profile || !profile.is_active) return renderNotAuthorized();
-  const onAdmin = location.hash.startsWith('#/admin');
-  const onLand = location.hash.startsWith('#/partner');
+  const onAccess = location.hash.startsWith('#/partners-access');
+  const onAdmin = location.hash.startsWith('#/admin') || onAccess;
+  const onLand = location.hash.startsWith('#/partner') && !onAccess;
   hdrRight.innerHTML = `<a href="#/" class="${(onAdmin || onLand) ? '' : 'on'}">Airlines</a>${profile.role === 'admin' ? `<a href="#/partners" class="${onLand ? 'on' : ''}">Partners</a>` : ''}${profile.role === 'admin' ? `<a href="#/admin" class="${onAdmin ? 'on' : ''}">Admin</a>` : ''}<span class="who">${esc(profile.full_name || profile.email)}${profile.role === 'admin' ? ' · admin' : ''}</span><span class="avatar" aria-hidden="true">${esc(initials(profile.full_name || profile.email))}</span><button id="out">Sign out</button>`;
   document.getElementById('out').onclick = signOut;
   const m = location.hash.match(/^#\/airline\/([a-z0-9\-]+)(\/edit)?/);
   app.className = (onAdmin || (m && m[2])) ? 'epage' : '';
   try {
-    const land = (onLand && typeof landRoute === 'function') ? landRoute(() => seq === routeSeq) : null;
+    const land = ((onLand || onAccess) && typeof landRoute === 'function') ? landRoute(() => seq === routeSeq) : null;
     const work = land ? land : location.hash.startsWith('#/admin') ? renderAdmin() : m ? renderAirline(m[1], () => seq === routeSeq, !!m[2] && profile.role === 'admin') : renderIndex(() => seq === routeSeq);
     await Promise.race([work, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))]);
   } catch (e) {
