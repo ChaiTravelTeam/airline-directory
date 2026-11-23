@@ -92,7 +92,7 @@ async function renderPartnersHome(alive = () => true) {
   for (const l of hits) { if (seen.has(l.partners.id)) continue; seen.add(l.partners.id); found.push(l); }
   app.innerHTML = `
   <section class="hero lhero"><div class="wrap-in">
-    <p class="kicker">Admin preview · ${total} partners</p>
+    <p class="kicker">Admin preview · ${total} partners · <a href="#/partners-access">People &amp; access</a></p>
     <h1>Find a partner.</h1>
     <p class="sub">Contacts, commission and booking details for hotels, cruise lines, tour operators and more.</p>
     <div class="tools"><label class="search">${ICON_SEARCH}<input type="search" id="lq" placeholder="Partner, brand or country…" value="${esc(landQ)}" autocomplete="off"></label></div>
@@ -203,6 +203,7 @@ function landRoute(alive) {
   const h = location.hash;
   if (h !== landLast) { landQ = ''; landSub = ''; landLast = h; }
   let m;
+  if (/^#\/partners-access/.test(h) && typeof renderAccess === 'function') return renderAccess(alive);
   if ((m = h.match(/^#\/partner\/([a-z0-9\-]+)\/edit/)) && typeof renderPartnerEdit === 'function') return renderPartnerEdit(m[1], alive);
   if ((m = h.match(/^#\/partner\/([a-z0-9\-]+)/))) return renderPartner(m[1], alive);
   if ((m = h.match(/^#\/partners\/([a-z_]+)/))) return renderPartnerCategory(m[1], alive);
