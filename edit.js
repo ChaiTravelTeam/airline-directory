@@ -201,7 +201,7 @@ async function askNotify(r, title) {
 const closeReport = id => sb.from('reports').update({ resolved_at: new Date().toISOString(), resolved_by: session.user.id }).eq('id', id);
 
 /* ---------- admin page ---------- */
-let adminQ = '';
+let adminQ = '', closedLimit = 50, closedOpen = false;
 async function renderAdmin() {
   if (!profile || profile.role !== 'admin') { app.innerHTML = '<p class="empty">Admins only.</p>'; return; }
   const air = await loadAirlines();
@@ -210,8 +210,9 @@ async function renderAdmin() {
     sb.from('allowlist').select('*').order('email'),
     sb.from('profiles').select('id,email,full_name,is_active,role,last_seen_at,created_at').order('created_at', { ascending: false }),
     sb.from('reports').select(REP).is('resolved_at', null).order('created_at', { ascending: false }),
-    sb.from('reports').select(REP).not('resolved_at', 'is', null).order('resolved_at', { ascending: false }).limit(8)
+    sb.from('reports').select(REP).not('resolved_at', 'is', null).order('resolved_at', { ascending: false }).limit(closedLimit + 1)
   ]);
+  const moreClosed = (closed || []).length > closedLimit; if (moreClosed) closed.length = closedLimit;
   const slugOf = r => air.find(x => x.id === r.airline_id)?.slug || '';
   const repHead = r => `<b>${r.airline_id ? `<a href="#/airline/${esc(slugOf(r))}">${esc(r.airlines?.code || '')} ${esc(r.airlines?.name || '')}</a>` : 'General'}</b> · <span class="muted">${esc(r.profiles?.full_name || r.profiles?.email || 'Weekly source check')} · ${new Date(r.created_at).toLocaleString()}</span>`;
   const repCard = r => {
@@ -226,7 +227,7 @@ async function renderAdmin() {
   <div class="ahead"><h2>Admin</h2><span class="src">${(list || []).length} on the access list · ${(list || []).filter(u => u.role === 'admin').length} admins</span></div>
   ${reports?.length ? `<section class="s"><h3>Needs review (${reports.length})</h3><p class="muted">Apply change updates the carrier page and closes the item. Dismiss and Mark done only close the item — they change nothing on the carrier page. When an item a person reported is closed, you can email them that it’s done.</p>${reports.map(repCard).join('')}</section>` : ''}
   ${unmatched.length ? `<section class="s"><h3>Signed in but not on the list (${unmatched.length})</h3><p class="muted">These people authenticated with Google/Microsoft but their address isn’t on the access list. Approve to add them as users.</p>${unmatched.map(p => `<div class="erow"><div class="etext">${esc(p.full_name || '')} <span class="muted">${esc(p.email)} · ${new Date(p.created_at).toLocaleString()}</span></div><div class="eact"><button class="mini" data-approve="${esc(p.email)}" data-name="${esc(p.full_name || '')}">Approve</button></div></div>`).join('')}</section>` : ''}
-  ${closed?.length ? `<details class="closed"><summary>Recently closed (${closed.length})</summary>${closed.map(r => `<div class="erow"><div class="etext">${repHead(r)} · <span class="muted">closed ${new Date(r.resolved_at).toLocaleDateString()}${r.reported_by ? (r.notified_at ? ` · requester emailed ${new Date(r.notified_at).toLocaleDateString()}` : ' · requester not emailed') : ''}</span><br>${esc(r.suggestion?.summary || r.message.slice(0, 220))}</div><div class="eact">${r.reported_by && !r.notified_at ? `<button class="mini dark" data-notify="${r.id}">Email requester</button>` : ''}<button class="mini" data-reopen="${r.id}">Reopen</button></div></div>`).join('')}</details>` : ''}
+  ${closed?.length ? `<details class="closed" ${closedOpen ? 'open' : ''}><summary>Recently closed (${closed.length}${moreClosed ? '+' : ''})</summary>${closed.map(r => `<div class="erow"><div class="etext">${repHead(r)} · <span class="muted">closed ${new Date(r.resolved_at).toLocaleDateString()}${r.reported_by ? (r.notified_at ? ` · requester emailed ${new Date(r.notified_at).toLocaleDateString()}` : ' · requester not emailed') : ''}</span><br>${esc(r.suggestion?.summary || r.message.slice(0, 220))}</div><div class="eact">${r.reported_by && !r.notified_at ? `<button class="mini dark" data-notify="${r.id}">Email requester</button>` : ''}<button class="mini" data-reopen="${r.id}">Reopen</button></div></div>`).join('')}${moreClosed ? '<p><button class="mini" data-more-closed>Show 50 more</button></p>' : ''}</details>` : ''}
   <section class="s"><h3>Access list <button class="mini" data-add-user>+ Add person</button> <button class="mini" data-import>Import CSV</button></h3>
   <div class="tools"><input type="search" id="aq" placeholder="Search name or email" value="${esc(adminQ)}"></div>
   <div class="wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Type</th><th>Active</th><th>Last sign-in</th><th></th></tr></thead><tbody>
@@ -246,6 +247,8 @@ async function renderAdmin() {
   app.querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => { const u = byEmail(b.dataset.toggle); if (u.email === profile.email) return toast('You can’t deactivate yourself.', true); await run(sb.from('allowlist').update({ is_active: !u.is_active }).eq('email', u.email), u.is_active ? 'Deactivated' : 'Activated') && renderAdmin(); });
   app.querySelectorAll('[data-remove]').forEach(b => b.onclick = async () => { const e = b.dataset.remove; if (e === profile.email) return toast('You can’t remove yourself.', true); if (await confirmBox(`Remove ${e} from the access list?`)) await run(sb.from('allowlist').delete().eq('email', e), 'Removed') && renderAdmin(); });
   app.querySelectorAll('[data-approve]').forEach(b => b.onclick = async () => { await run(sb.from('allowlist').insert({ email: b.dataset.approve, full_name: b.dataset.name || null, role: 'user', advisor_type: 'ic', added_by: profile.email }), 'Approved') && renderAdmin(); });
+  const cd = app.querySelector('details.closed'); if (cd) cd.ontoggle = () => { closedOpen = cd.open; };
+  const mc = app.querySelector('[data-more-closed]'); if (mc) mc.onclick = () => { closedLimit += 50; closedOpen = true; renderAdmin(); };
   const rep = id => [...(reports || []), ...(closed || [])].find(r => r.id === id);
   app.querySelectorAll('[data-apply]').forEach(b => b.onclick = async () => {
     const r = rep(b.dataset.apply); const ask = await askNotify(r, `Apply change · ${r.airlines?.code || ''} ${r.airlines?.name || ''}`); if (!ask) return;
