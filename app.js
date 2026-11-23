@@ -243,7 +243,7 @@ async function renderAirline(slug, alive = () => true, editMode = false) {
     const cnotes = {}, leftover = [];
     for (const l of cLines) {
       const hit = contracts.filter(c => l.startsWith(c.title)).sort((x, y) => y.title.length - x.title.length)[0];
-      if (!hit) { leftover.push(l); continue; }
+      if (!hit) { if (l.trim() && !contracts.some(c => (c.summary || '').includes(l.trim()))) leftover.push(l); continue; }
       let rest = l.slice(hit.title.length).trim();
       if (hit.tour_code) rest = rest.replace(new RegExp('^\\(\\s*' + hit.tour_code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\)\\s*'), '');
       rest = rest.replace(/^\(\s*[A-Z0-9/# ]{3,20}\s*\)\s*/, '');
@@ -257,8 +257,8 @@ async function renderAirline(slug, alive = () => true, editMode = false) {
         ? `<a class="pdf" href="#" data-doc="${esc(c.chai_file_path)}">${esc(c.title)}</a>`
         : c.f1s_pdf_url ? `<a class="pdf" href="${esc(c.f1s_pdf_url)}" target="_blank" rel="noopener" title="Opens on the partner SharePoint (separate login required)">${esc(c.title)}</a>` : esc(c.title);
       const valid = (c.valid_from || to) ? `<span class="dot"></span>${c.valid_from ? fmtDate(c.valid_from) + ' – ' : ''}${to}${cls === 'exp' ? ' · expired' : cls === 'soon' ? ' · expires soon' : ''}` : '<span class="empty">—</span>';
-      return `<tr><td>${doc}${cnotes[c.id] ? `<div class="cnote">${lineHtml(cnotes[c.id])}</div>` : ''}</td><td class="tcode">${esc(c.tour_code || '')}</td><td class="${cls}">${valid}</td></tr>`;
-    }).join('')}${leftover.map(l => `<tr class="extra"><td colspan="3">${lineHtml(l)}</td></tr>`).join('')}</tbody></table></div></div>`);
+      return `<tr><td>${doc}${cnotes[c.id] ? `<div class="cnote">${lineHtml(cnotes[c.id])}</div>` : ''}${(c.summary || '').split('\n').filter(x => x.trim()).map(x => `<div class="cnote">${lineHtml(x)}</div>`).join('')}</td><td class="tcode">${esc(c.tour_code || '')}</td><td class="${cls}">${valid}</td></tr>`;
+    }).join('')}${leftover.length ? '<tr class="extra hd"><td colspan="3">General notes · not tied to one program</td></tr>' : ''}${leftover.map(l => `<tr class="extra"><td colspan="3">${lineHtml(l)}</td></tr>`).join('')}</tbody></table></div></div>`);
   }
   const secs = sections.filter(s => s.heading !== 'Contracts & commission').map(s => `<section class="s"><h3>${lineHtml(s.heading)}</h3>${s.body.split('\n').map(l => `<p>${lineHtml(l)}</p>`).join('')}</section>`).join('');
   const other = links.filter(k => !used.has(k.id) && !contracts.some(c => c.f1s_pdf_url === k.url));

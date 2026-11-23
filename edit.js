@@ -1,7 +1,7 @@
 /* Chai Travel Advisors · Airline Directory · editor + admin (admins only) */
 
 /* ---------- generic modal form ---------- */
-function modalForm(title, fields, values = {}) {
+function modalForm(title, fields, values = {}, okLabel = 'Save') {
   return new Promise(resolve => {
     const wrap = document.createElement('div'); wrap.className = 'modal-bg';
     const inp = f => {
@@ -13,11 +13,18 @@ function modalForm(title, fields, values = {}) {
       return `<input type="${f.type || 'text'}" name="${f.key}" value="${esc(v)}" ${f.placeholder ? `placeholder="${esc(f.placeholder)}"` : ''}>`;
     };
     wrap.innerHTML = `<div class="modal"><h3>${esc(title)}</h3><form>${fields.map(f => `<label class="fld ${f.type === 'checkbox' ? 'chk' : ''}"><span>${esc(f.label)}${f.hint ? ` <small>${esc(f.hint)}</small>` : ''}</span>${inp(f)}</label>`).join('')}
-      <div class="modal-actions"><button type="button" class="btn2" data-x>Cancel</button><button type="submit" class="btn2 primary">Save</button></div></form></div>`;
+      <div class="modal-actions"><button type="button" class="btn2" data-x>Cancel</button><button type="submit" class="btn2 primary">${esc(okLabel)}</button></div></form></div>`;
     document.body.appendChild(wrap);
-    const close = v => { wrap.remove(); resolve(v); };
-    wrap.querySelector('[data-x]').onclick = () => close(null);
-    wrap.onclick = e => { if (e.target === wrap) close(null); };
+    const form = wrap.querySelector('form');
+    // what's in the form right now, so we can tell whether anything was typed
+    const snap = () => fields.map(f => { const el = form.elements[f.key]; return f.type === 'checkbox' ? el.checked : f.type === 'file' ? (el.files[0]?.name || '') : el.value; }).join('\u0001');
+    const start = snap();
+    const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); cancel(); } };
+    const close = v => { document.removeEventListener('keydown', onKey); wrap.remove(); resolve(v); };
+    // Clicking outside the box does nothing. Cancel and Esc ask first if anything was changed.
+    const cancel = () => { if (snap() !== start && !window.confirm('Discard what you’ve entered?')) return; close(null); };
+    document.addEventListener('keydown', onKey);
+    wrap.querySelector('[data-x]').onclick = cancel;
     wrap.querySelector('form').onsubmit = e => {
       e.preventDefault(); const out = {};
       for (const f of fields) {
@@ -133,7 +140,7 @@ async function renderHistory(airlineId) {
 
 /* ---------- report a problem (any user) ---------- */
 async function reportProblem(a) {
-  const v = await modalForm(`Report a problem · ${a.code} ${a.name}`, [{ key: 'message', label: 'What’s wrong or out of date?', type: 'textarea', rows: 5 }]);
+  const v = await modalForm(`Report a problem · ${a.code} ${a.name}`, [{ key: 'message', label: 'What’s wrong or out of date?', type: 'textarea', rows: 5 }], {}, 'Send');
   if (!v || !v.message) return;
   await run(sb.from('reports').insert({ airline_id: a.id, reported_by: session.user.id, message: v.message }), 'Thanks — sent to the admins.');
 }
@@ -174,6 +181,23 @@ async function applySuggestion(r) {
   }
   AIRLINES = null; return true;
 }
+// Email the person who reported it (edge function notify-report-closed). Never blocks closing the item.
+async function notifyReporter(r, note, resend) {
+  const { data, error } = await sb.functions.invoke('notify-report-closed', { body: { report_id: r.id, note: note || null, resend: !!resend } });
+  if (!error && data?.ok) { toast(`Closed — emailed ${data.to}`); return true; }
+  let msg = error?.message || 'unknown error';
+  try { const j = await error.context.json(); if (j?.error) msg = j.error; } catch (_) {}
+  toast(`Email not sent: ${msg}`, true); return false;
+}
+const repWho = r => r.profiles?.full_name || r.profiles?.email || 'the requester';
+// Closing an item a person reported: offer to tell them, with an optional note.
+async function askNotify(r, title) {
+  if (!r.reported_by) return { notify: false };
+  return modalForm(title, [
+    { key: 'notify', label: `Email ${repWho(r)} that this is done and ask them to review it`, type: 'checkbox', default: true },
+    { key: 'note', label: 'Note to include', type: 'textarea', rows: 3, hint: 'optional — e.g. what you changed, or what you couldn’t do' }
+  ], {}, 'Mark done');
+}
 const closeReport = id => sb.from('reports').update({ resolved_at: new Date().toISOString(), resolved_by: session.user.id }).eq('id', id);
 
 /* ---------- admin page ---------- */
@@ -181,7 +205,7 @@ let adminQ = '';
 async function renderAdmin() {
   if (!profile || profile.role !== 'admin') { app.innerHTML = '<p class="empty">Admins only.</p>'; return; }
   const air = await loadAirlines();
-  const REP = 'id,message,suggestion,created_at,resolved_at,airline_id,reported_by,airlines(code,name),profiles!reports_reported_by_fkey(full_name,email)';
+  const REP = 'id,message,suggestion,created_at,resolved_at,notified_at,airline_id,reported_by,airlines(code,name),profiles!reports_reported_by_fkey(full_name,email)';
   const [{ data: list }, { data: profs }, { data: reports }, { data: closed }] = await Promise.all([
     sb.from('allowlist').select('*').order('email'),
     sb.from('profiles').select('id,email,full_name,is_active,role,last_seen_at,created_at').order('created_at', { ascending: false }),
@@ -200,9 +224,9 @@ async function renderAdmin() {
   const seen = e => { const p = (profs || []).find(x => x.email === e); return p?.last_seen_at ? new Date(p.last_seen_at).toLocaleDateString() : '<span class="empty">never</span>'; };
   app.innerHTML = `<a class="back" href="#/">← All airlines</a>
   <div class="ahead"><h2>Admin</h2><span class="src">${(list || []).length} on the access list · ${(list || []).filter(u => u.role === 'admin').length} admins</span></div>
-  ${reports?.length ? `<section class="s"><h3>Needs review (${reports.length})</h3><p class="muted">Apply change updates the carrier page and closes the item. Dismiss and Mark done only close the item — they change nothing on the carrier page.</p>${reports.map(repCard).join('')}</section>` : ''}
+  ${reports?.length ? `<section class="s"><h3>Needs review (${reports.length})</h3><p class="muted">Apply change updates the carrier page and closes the item. Dismiss and Mark done only close the item — they change nothing on the carrier page. When an item a person reported is closed, you can email them that it’s done.</p>${reports.map(repCard).join('')}</section>` : ''}
   ${unmatched.length ? `<section class="s"><h3>Signed in but not on the list (${unmatched.length})</h3><p class="muted">These people authenticated with Google/Microsoft but their address isn’t on the access list. Approve to add them as users.</p>${unmatched.map(p => `<div class="erow"><div class="etext">${esc(p.full_name || '')} <span class="muted">${esc(p.email)} · ${new Date(p.created_at).toLocaleString()}</span></div><div class="eact"><button class="mini" data-approve="${esc(p.email)}" data-name="${esc(p.full_name || '')}">Approve</button></div></div>`).join('')}</section>` : ''}
-  ${closed?.length ? `<details class="closed"><summary>Recently closed (${closed.length})</summary>${closed.map(r => `<div class="erow"><div class="etext">${repHead(r)} · <span class="muted">closed ${new Date(r.resolved_at).toLocaleDateString()}</span><br>${esc(r.suggestion?.summary || r.message.slice(0, 220))}</div><div class="eact"><button class="mini" data-reopen="${r.id}">Reopen</button></div></div>`).join('')}</details>` : ''}
+  ${closed?.length ? `<details class="closed"><summary>Recently closed (${closed.length})</summary>${closed.map(r => `<div class="erow"><div class="etext">${repHead(r)} · <span class="muted">closed ${new Date(r.resolved_at).toLocaleDateString()}${r.reported_by ? (r.notified_at ? ` · requester emailed ${new Date(r.notified_at).toLocaleDateString()}` : ' · requester not emailed') : ''}</span><br>${esc(r.suggestion?.summary || r.message.slice(0, 220))}</div><div class="eact">${r.reported_by && !r.notified_at ? `<button class="mini dark" data-notify="${r.id}">Email requester</button>` : ''}<button class="mini" data-reopen="${r.id}">Reopen</button></div></div>`).join('')}</details>` : ''}
   <section class="s"><h3>Access list <button class="mini" data-add-user>+ Add person</button> <button class="mini" data-import>Import CSV</button></h3>
   <div class="tools"><input type="search" id="aq" placeholder="Search name or email" value="${esc(adminQ)}"></div>
   <div class="wrap"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Type</th><th>Active</th><th>Last sign-in</th><th></th></tr></thead><tbody>
@@ -222,8 +246,24 @@ async function renderAdmin() {
   app.querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => { const u = byEmail(b.dataset.toggle); if (u.email === profile.email) return toast('You can’t deactivate yourself.', true); await run(sb.from('allowlist').update({ is_active: !u.is_active }).eq('email', u.email), u.is_active ? 'Deactivated' : 'Activated') && renderAdmin(); });
   app.querySelectorAll('[data-remove]').forEach(b => b.onclick = async () => { const e = b.dataset.remove; if (e === profile.email) return toast('You can’t remove yourself.', true); if (await confirmBox(`Remove ${e} from the access list?`)) await run(sb.from('allowlist').delete().eq('email', e), 'Removed') && renderAdmin(); });
   app.querySelectorAll('[data-approve]').forEach(b => b.onclick = async () => { await run(sb.from('allowlist').insert({ email: b.dataset.approve, full_name: b.dataset.name || null, role: 'user', advisor_type: 'ic', added_by: profile.email }), 'Approved') && renderAdmin(); });
-  const rep = id => (reports || []).find(r => r.id === id);
-  app.querySelectorAll('[data-apply]').forEach(b => b.onclick = async () => { b.disabled = true; const r = rep(b.dataset.apply); if (await applySuggestion(r)) { await run(closeReport(r.id), 'Applied to the carrier page'); } renderAdmin(); });
-  app.querySelectorAll('[data-close]').forEach(b => b.onclick = async () => { if (b.dataset.dismiss && !(await confirmBox('Dismiss without changing the carrier page?'))) return; await run(closeReport(b.dataset.close), 'Closed') && renderAdmin(); });
+  const rep = id => [...(reports || []), ...(closed || [])].find(r => r.id === id);
+  app.querySelectorAll('[data-apply]').forEach(b => b.onclick = async () => {
+    const r = rep(b.dataset.apply); const ask = await askNotify(r, `Apply change · ${r.airlines?.code || ''} ${r.airlines?.name || ''}`); if (!ask) return;
+    b.disabled = true;
+    if (await applySuggestion(r) && await run(closeReport(r.id), 'Applied to the carrier page') && ask.notify) await notifyReporter(r, ask.note);
+    renderAdmin();
+  });
+  app.querySelectorAll('[data-close]').forEach(b => b.onclick = async () => {
+    const r = rep(b.dataset.close);
+    if (b.dataset.dismiss) { if (!(await confirmBox('Dismiss without changing the carrier page?'))) return; await run(closeReport(r.id), 'Closed') && renderAdmin(); return; }
+    const ask = await askNotify(r, `Mark done · ${r.airline_id ? `${r.airlines?.code || ''} ${r.airlines?.name || ''}` : 'General'}`); if (!ask) return;
+    if (await run(closeReport(r.id), ask.notify ? null : 'Closed') && ask.notify) await notifyReporter(r, ask.note);
+    renderAdmin();
+  });
+  app.querySelectorAll('[data-notify]').forEach(b => b.onclick = async () => {
+    const r = rep(b.dataset.notify);
+    const v = await modalForm(`Email ${repWho(r)}`, [{ key: 'note', label: 'Note to include', type: 'textarea', rows: 3, hint: 'optional' }], {}, 'Send email');
+    if (!v) return; b.disabled = true; await notifyReporter(r, v.note); renderAdmin();
+  });
   app.querySelectorAll('[data-reopen]').forEach(b => b.onclick = async () => { await run(sb.from('reports').update({ resolved_at: null, resolved_by: null }).eq('id', b.dataset.reopen), 'Reopened') && renderAdmin(); });
 }
