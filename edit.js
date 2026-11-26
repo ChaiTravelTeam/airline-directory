@@ -146,7 +146,7 @@ async function reportProblem(a) {
 }
 
 /* ---------- review queue: suggested changes ---------- */
-const SUG = { contacts: ['kind', 'label', 'name', 'phone', 'phone_mobile', 'email', 'queue', 'hours', 'notes'], contracts: ['title', 'tour_code', 'valid_from', 'valid_to', 'status', 'summary'], links: ['label', 'url', 'is_pdf'], airline_sections: ['heading', 'body'] };
+const SUG = { contacts: ['kind', 'label', 'name', 'phone', 'phone_mobile', 'email', 'queue', 'hours', 'notes'], contracts: ['title', 'tour_code', 'valid_from', 'valid_to', 'status', 'summary', 'chai_file_path'], links: ['label', 'url', 'is_pdf', 'chai_file_path'], airline_sections: ['heading', 'body'] };
 const SUG_NOUN = { contacts: 'contact', contracts: 'contract', links: 'link', airline_sections: 'section' };
 const sugChanges = r => (r.suggestion?.changes || []).filter(c => c && c.op);
 const sugDoable = r => sugChanges(r).filter(c => c.op !== 'note' && SUG[c.table]);
